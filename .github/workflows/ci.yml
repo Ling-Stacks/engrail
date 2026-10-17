@@ -92,7 +92,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-      - name: Single-file crypto library: vectors + benchmark build
+      - name: "Single-file crypto library: vectors + benchmark build"
         run: |
           sh crypto/build.sh
           sh crypto/bench.sh --json > bench_out.json
@@ -133,5 +133,5 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
-      - name: C# binding: build native lib + run demo
+      - name: "C# binding: build native lib + run demo"
         run: sh bindings/csharp/build.sh
