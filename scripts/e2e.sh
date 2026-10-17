@@ -15,8 +15,9 @@ set -euo pipefail
 CXX="${CXX:-c++}"
 CXXFLAGS="${CXXFLAGS:--O2}"
 case "$(uname -s 2>/dev/null || echo unknown)" in
-    MINGW*|MSYS*|CYGWIN*) EXESUF=".exe" ;;   # paths handed to native tools
-    *)                    EXESUF="" ;;
+    MINGW*|MSYS*|CYGWIN*) EXESUF=".exe"; STATIC_CXX="-static-libstdc++" ;;   # paths handed to native tools
+    Darwin*)              EXESUF="";    STATIC_CXX="" ;;
+    *)                    EXESUF="";    STATIC_CXX="-static-libstdc++" ;;
 esac
 export ACT_LANG=en  # e2e 输出稳定性
 
@@ -36,7 +37,7 @@ echo "   pubkey: $PUBKEY"
 echo "== 2. rebuild example with the embedded public key =="
 $CXX $CXXFLAGS -Wall -Wextra -Werror -std=c++17 -Iinclude \
     -DACT_PUBKEY_HEX=\"$PUBKEY\" -DACT_PRODUCT_ID=1 -DACT_STATE_PATH=\"build/demo_state.act\" \
-    examples/simple_check.cpp build/libactivation.a -static-libstdc++ -o build/simple_check
+    examples/simple_check.cpp build/libactivation.a $STATIC_CXX -o build/simple_check
 
 echo "== 3. customer: app shows machine code =="
 MC=$((./build/simple_check || true) | sed -n "s/^machine code: //p")
