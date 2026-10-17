@@ -663,6 +663,8 @@ else
     CSTD_FLAG=""
     SHARED_EXT=".dll"
     EXEEXT=".exe"
+    ENDIAN="little"
+    PTRSZ="8"
     say "MSVC toolchain"; done_ "capability probes skipped (CMake build path)"; warn
 fi
 
