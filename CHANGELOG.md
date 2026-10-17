@@ -36,6 +36,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); versions follow 
 - Shared-library suffix is platform-derived (.so/.dll/.dylib) instead
   of a hardcoded `.so` for a PE DLL (C5).
 - CMake minimum 3.13 (matches `target_link_options` usage, C3).
+- `-static-libstdc++` is no longer passed on macOS: Apple clang treats
+  it as an unused argument and, under `-Werror`, that warning killed
+  both the configure C++17 probe and every generated-Makefile C++ link.
+- MSVC (`--cc=cl`): the GNU-style warning-clean C99 probe degrades to
+  a warning instead of aborting configure — the MSVC build path is the
+  generated CMakeLists, not the GNU-flag Makefile.
 - tests/run_all.sh fallback build: `CC` default, `EXESUF`, and link
   flags sourced from config.vars (C10).
 - crypto/build.sh & bench.sh: robust Python resolution (C9);

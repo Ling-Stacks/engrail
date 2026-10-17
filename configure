@@ -322,7 +322,11 @@ log "c99.c:"; sed 's/^/  | /' "$T/c99.c" >> "$LOG"
 
 chk "whether $CSTD_FLAG -Wall -Wextra -Werror is clean" \
     sh -c '"$1" $5 -Wall -Wextra -Werror -o "$2/c99f" "$2/c99flags.c"' x "$CC" "$T" "$CSTD_FLAG" \
-    && ok || die "cannot build warning-clean C99 (project enforces -Werror)"
+    && ok || case "$CC" in
+        cl|*/cl|*/cl.exe|cl.exe)
+            warn; log "MSVC: GNU-style warning-clean probe skipped (CMake build path)" ;;
+        *)  die "cannot build warning-clean C99 (project enforces -Werror)" ;;
+    esac
 
 chk "for snprintf" \
     sh -c '"$1" -std=c99 -Werror -o "$2/snz" "$2/snz.c" && "$2/snz"' x "$CC" "$T" \
@@ -374,12 +378,20 @@ int main() {
 }
 EOF
 
+# -static-libstdc++ is an unused argument on Darwin (libc++ is always
+# dynamic there) and Apple clang promotes that warning to an error
+# under -Werror, so keep it for ELF/PE toolchains only.
+case "$OS_NAME" in
+    Darwin*) export STATIC_LIBSTDCXX="" ;;
+    *)       export STATIC_LIBSTDCXX="-static-libstdc++" ;;
+esac
+
 chk "whether the C++ compiler works" \
-    sh -c '"$1" $2 -static-libstdc++ -o "$3/hp" "$3/hello.cpp" && "$3/hp" >/dev/null' x "$CXX" "$CXXFLAGS" "$T" \
+    sh -c '"$1" $2 $STATIC_LIBSTDCXX -o "$3/hp" "$3/hello.cpp" && "$3/hp" >/dev/null' x "$CXX" "$CXXFLAGS" "$T" \
     && ok || die "C++ compiler cannot build and run"
 
 chk "whether $CXX accepts -std=c++17 -Wall -Wextra -Werror" \
-    sh -c '"$1" -std=c++17 -Wall -Wextra -Werror -static-libstdc++ -o "$2/p17" "$2/cpp17.cpp" && "$2/p17"' x "$CXX" "$T" \
+    sh -c '"$1" -std=c++17 -Wall -Wextra -Werror $STATIC_LIBSTDCXX -o "$2/p17" "$2/cpp17.cpp" && "$2/p17"' x "$CXX" "$T" \
     && ok || die "C++17 toolchain broken: vendor CLI / C++ wrapper cannot build"
 log "cpp17.cpp:"; sed 's/^/  | /' "$T/cpp17.cpp" >> "$LOG"
 
@@ -723,7 +735,7 @@ CMAKE_TEST_LIST=$(printf '%s;' "$TEST_SRCS" | sed 's|tests/||g;s/  */;/g;s/\.c//
 sed \
     -e "s|@CC@|$CC|g" -e "s|@CXX@|$CXX|g" -e "s|@AR@|$AR|g" \
     -e "s|@CFLAGS@|$CFLAGS|g" -e "s|@CXXFLAGS@|$CXXFLAGS|g" \
-    -e "s|@LDFLAGS@|$LDFLAGS|g" -e "s|@LDFLAGS_CXX@|-static-libstdc++|g" \
+    -e "s|@LDFLAGS@|$LDFLAGS|g" -e "s|@LDFLAGS_CXX@|$STATIC_LIBSTDCXX|g" \
     -e "s|@WARN_CFLAGS@|-Wall -Wextra -Werror|g" \
     -e "s|@WARN_CXXFLAGS@|-Wall -Wextra -Werror|g" \
     -e "s|@CSTD@|$CSTD_FLAG|g" -e "s|@CXXSTD@|-std=c++17|g" \
@@ -752,7 +764,7 @@ sed \
     -e "s|@PROJECT_DESCRIPTION@|Offline activation verification with Ed25519 and SM2|g" \
     -e "s|@CSTD_NUM@|99|g" -e "s|@CXXSTD_NUM@|17|g" \
     -e "s|@WARN_C_LIST@|-Wall;-Wextra|g" -e "s|@WARN_CXX_LIST@|-Wall;-Wextra|g" \
-    -e "s|@LDFLAGS_CXX_ONLY@|-static-libstdc++|g" -e "s|@PREFIX@|$PREFIX|g" \
+    -e "s|@LDFLAGS_CXX_ONLY@|$STATIC_LIBSTDCXX|g" -e "s|@PREFIX@|$PREFIX|g" \
     -e "s|@BUILD_TESTS@|$BUILD_TESTS|g" -e "s|@BUILD_TOOLS@|$BUILD_TOOLS|g" \
     -e "s|@BUILD_EXAMPLES@|$BUILD_EXAMPLES|g" -e "s|@BUILD_BENCH@|$BUILD_BENCH|g" \
     -e "s|@BUILD_SHARED@|$BUILD_SHARED|g" \
