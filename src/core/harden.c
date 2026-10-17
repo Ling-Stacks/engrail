@@ -55,7 +55,7 @@
 
 /* Executable path resolution (per platform)                           */
 
-#if defined(_WIN32)
+#if defined(_WIN32) || defined(__CYGWIN__)
 #  ifndef WIN32_LEAN_AND_MEAN
 #    define WIN32_LEAN_AND_MEAN
 #  endif
@@ -83,7 +83,9 @@
  */
 static int self_path(char *buf, size_t cap)
 {
-#if defined(_WIN32)
+#if defined(_WIN32) || defined(__CYGWIN__)
+    /* Cygwin/MSYS targets define __unix__ but have no working
+     * /proc/curproc/exe; the Win32 API is available there. */
     const DWORD n = GetModuleFileNameA(NULL, buf, (DWORD)cap);
     return (n > 0 && n < cap) ? (int)n : -1;
 #elif defined(__APPLE__)
@@ -166,7 +168,7 @@ int act_harden_debugger_present(void)
 act_status act_harden_compute_digest(const char *path, uint8_t out[64])
 {
     /* Digest of the file with EVERY integrity slot's digest region
-     * zeroed. Slot = magic(17) || end-magic(18) || digest(64).
+     * zeroed. Slot = magic(17) || digest(64) || end-magic(18).
      *
      * Reads the whole file (executables are a few MB -- fine for a
      * startup check), zeroes slot regions in memory, hashes once.
@@ -208,7 +210,7 @@ act_status act_harden_compute_digest(const char *path, uint8_t out[64])
     for (long i = 0; i <= limit; i++) {
         if (buf[i] == 'A' &&
             memcmp(buf + i, ACT_INTEGRITY_MAGIC, ACT_INTEGRITY_MAGIC_LEN) == 0 &&
-            memcmp(buf + i + ACT_INTEGRITY_MAGIC_LEN,
+            memcmp(buf + i + ACT_INTEGRITY_END_OFF,
                    ACT_INTEGRITY_END, ACT_INTEGRITY_END_LEN) == 0) {
             memset(buf + i + ACT_INTEGRITY_DIGEST_OFF, 0, 64);
         }
@@ -264,7 +266,7 @@ act_status act_harden_selfcheck(void)
     for (long i = 0; i <= limit; i++) {
         if (buf[i] == 'A' &&
             memcmp(buf + i, ACT_INTEGRITY_MAGIC, ACT_INTEGRITY_MAGIC_LEN) == 0 &&
-            memcmp(buf + i + ACT_INTEGRITY_MAGIC_LEN,
+            memcmp(buf + i + ACT_INTEGRITY_END_OFF,
                    ACT_INTEGRITY_END, ACT_INTEGRITY_END_LEN) == 0) {
             structure_seen = 1;
             const uint8_t *stored = buf + i + ACT_INTEGRITY_DIGEST_OFF;

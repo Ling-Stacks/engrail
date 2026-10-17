@@ -228,6 +228,20 @@ say "C compiler identity"; done_ "${CCVER:-unknown}"; log "  $CC --version: $CCV
 CXXVER=$("$CXX" --version 2>/dev/null | head -1)
 say "C++ compiler identity"; done_ "${CXXVER:-unknown}"; log "  $CXX --version: $CXXVER"; ok
 
+# -static-libstdc++ is an unused argument on Darwin (libc++ is always
+# dynamic there) and Apple clang promotes that warning to an error
+# under -Werror; MSVC does not know the flag at all. ELF/PE GCC only.
+IS_MSVC=0
+case "$CC" in
+    cl|*/cl|*/cl.exe|cl.exe) IS_MSVC=1 ;;
+esac
+case "$OS_NAME:$IS_MSVC" in
+    Darwin*:*) export STATIC_LIBSTDCXX="" ;;
+    *:1)       export STATIC_LIBSTDCXX="" ;;
+    *)         export STATIC_LIBSTDCXX="-static-libstdc++" ;;
+esac
+
+if [ "$IS_MSVC" -eq 0 ]; then
 # ================================================================
 # SECTION 3: C compiler functionality (12 probes)
 # ================================================================
@@ -377,14 +391,6 @@ int main() {
     return 0;
 }
 EOF
-
-# -static-libstdc++ is an unused argument on Darwin (libc++ is always
-# dynamic there) and Apple clang promotes that warning to an error
-# under -Werror, so keep it for ELF/PE toolchains only.
-case "$OS_NAME" in
-    Darwin*) export STATIC_LIBSTDCXX="" ;;
-    *)       export STATIC_LIBSTDCXX="-static-libstdc++" ;;
-esac
 
 chk "whether the C++ compiler works" \
     sh -c '"$1" $2 $STATIC_LIBSTDCXX -o "$3/hp" "$3/hello.cpp" && "$3/hp" >/dev/null' x "$CXX" "$CXXFLAGS" "$T" \
@@ -649,6 +655,17 @@ else
     say "whether getpid() is available"; done_ "POSIX-only, skipped on Windows"; skip
 fi
 
+else
+    # MSVC: the GNU-dialect probes above cannot run under cl (unknown
+    # options, no -o); the supported MSVC consumer is the generated
+    # CMakeLists.txt. Provide the probe-fed variables from platform
+    # defaults instead.
+    CSTD_FLAG=""
+    SHARED_EXT=".dll"
+    EXEEXT=".exe"
+    say "MSVC toolchain"; done_ "capability probes skipped (CMake build path)"; warn
+fi
+
 # ================================================================
 # SECTION 7: project tree (30 files, version, sources parse)
 # ================================================================
@@ -696,7 +713,7 @@ say "python3 version"; done_ "$PY3VER"; log "  $PY3VER"; [ "$PY3VER" != none ] &
 chk "for cmake" command -v cmake && ok || { say "cmake"; done_ "absent, Make workflow unaffected"; skip; }
 chk "for git" command -v git && ok || skip
 chk "for bash" command -v bash && ok || skip
-chk "for make" command -v make && ok || die "make not found -- cannot build"
+chk "for make" command -v make && ok || { if [ "$IS_MSVC" -eq 1 ]; then say "make"; done_ "absent (MSVC uses CMake)"; warn; else die "make not found -- cannot build"; fi; }
 
 MAKEVER=$(make --version 2>/dev/null | head -1 || echo none)
 say "make version"; done_ "${MAKEVER:-unknown}"; ok

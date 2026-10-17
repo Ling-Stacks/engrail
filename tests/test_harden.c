@@ -23,11 +23,11 @@ static long synth_fresh(const char *path)
     }
     fwrite("PRE", 1, 3, f);
     fwrite(ACT_INTEGRITY_MAGIC, 1, ACT_INTEGRITY_MAGIC_LEN, f);
-    fwrite(ACT_INTEGRITY_END, 1, ACT_INTEGRITY_END_LEN, f);
     for (int i = 0; i < 64; i++) {
         uint8_t b = ACT_INTEGRITY_FRESH;
         fwrite(&b, 1, 1, f);
     }
+    fwrite(ACT_INTEGRITY_END, 1, ACT_INTEGRITY_END_LEN, f);
     fwrite("POST", 1, 4, f);
     fclose(f);
     return 3; /* slot starts after "PRE" */
@@ -143,10 +143,13 @@ int main(void)
          * keep the test hermetic; integrity gate tolerates unpatched) */
         char code[ACT_CODE_MAX_CHARS];
         act_license_encode(payload, sig, code, sizeof(code));
-        CHECK(act_verify_hardened(code, pk, 9, machine,
-                                  ACT_EXPIRY_EPOCH + 100 * 86400LL, 0, 1,
-                                  NULL) == ACT_OK,
-              "verify_hardened accepts a genuine code");
+        const act_status vhs = act_verify_hardened(
+            code, pk, 9, machine, ACT_EXPIRY_EPOCH + 100 * 86400LL, 0, 1,
+            NULL);
+        char vmsg[96];
+        snprintf(vmsg, sizeof(vmsg),
+                 "verify_hardened accepts a genuine code (got %d)", (int)vhs);
+        CHECK(vhs == ACT_OK, vmsg);
     }
 
     remove(path);

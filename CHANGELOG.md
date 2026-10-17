@@ -5,6 +5,24 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); versions follow 
 
 ## [1.7.2] — 2026-10
 
+### Fixed — self-integrity (MinGW / MSYS field report, CI issue #1)
+- The integrity slot layout is now `magic(17) || digest(64) ||
+  end-magic(18)`. With the digest placed last, the two marker string
+  literals that the compiler emits adjacently into .rdata of ANY
+  binary linked against the library classified as a tampered slot on
+  MinGW/PE, failing `verify_hardened` for every unpatched build
+  (test_license:467, test_harden:146). The digest between the magics
+  cannot be formed accidentally; tampering detection is unchanged.
+- `self_path()` on Cygwin/MSYS targets now resolves via
+  `GetModuleFileNameA` — those targets define `__unix__` but have no
+  working `/proc/curproc/exe`, which made `act_harden_selfcheck()`
+  fail with ACT_ERR_INTEGRITY on every call.
+- The C++ `ACT_INTEGRITY_SLOT` byte list carried 78 fingerprint bytes
+  instead of 64 (never instantiated anywhere, so it never failed a
+  build); it now matches the 99-byte slot exactly.
+- The two hardened-verify CHECK failures now print the returned
+  status code for future field diagnosis.
+
 ### Fixed — cross-platform build (field report R3, Linux GCC 15 / Windows MinGW)
 - Strict `-std=c99` hid POSIX/glibc declarations (`syscall`, `readlink`,
   `fchmod`, `fileno`, `sysctl`) — L1/L2/L4. Root fix: configure now
@@ -45,6 +63,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); versions follow 
 - MSVC (`--cc=cl`): the GNU-style warning-clean C99 probe degrades to
   a warning instead of aborting configure — the MSVC build path is the
   generated CMakeLists, not the GNU-flag Makefile.
+- MSVC: all GNU-dialect capability probes (sections 3–6.95) are now
+  skipped with platform defaults when CC is cl; configure generates
+  CMakeLists.txt for the MSVC workflow instead of aborting, and the
+  `make` requirement is waived there (CI issue #2).
 - tests/run_all.sh fallback build: `CC` default, `EXESUF`, and link
   flags sourced from config.vars (C10).
 - crypto/build.sh & bench.sh: robust Python resolution (C9);

@@ -1521,14 +1521,20 @@ int act_harden_debugger_present(void);
 #define ACT_INTEGRITY_MAGIC_LEN 17
 #define ACT_INTEGRITY_END       "ACT-INTEGRITY-END!"
 #define ACT_INTEGRITY_END_LEN   18
-/** Digest starts right after the two magics. */
-#define ACT_INTEGRITY_DIGEST_OFF (ACT_INTEGRITY_MAGIC_LEN + ACT_INTEGRITY_END_LEN)
-/** Full slot layout: magic(17) + end magic(18) + digest(64) = 99 bytes. */
-#define ACT_INTEGRITY_SLOT_SIZE (ACT_INTEGRITY_DIGEST_OFF + 64)
+/** Digest sits between the magics. */
+#define ACT_INTEGRITY_DIGEST_OFF ACT_INTEGRITY_MAGIC_LEN
+/** Full slot layout: magic(17) + digest(64) + end magic(18) = 99 bytes.
+ *  The digest BETWEEN the two magics is what makes a slot real: the two
+ *  marker string literals also appear adjacently in .rodata of any
+ *  binary linked against this library, and with the digest placed last
+ *  that accidental pair used to classify as a tampered slot. */
+#define ACT_INTEGRITY_SLOT_SIZE (ACT_INTEGRITY_DIGEST_OFF + 64 + ACT_INTEGRITY_END_LEN)
+/** Offset of the trailing end magic inside a slot. */
+#define ACT_INTEGRITY_END_OFF (ACT_INTEGRITY_SLOT_SIZE - ACT_INTEGRITY_END_LEN)
 
 /**
  * Place this once at file scope in your application to reserve the
- * 81-byte integrity slot that `engrail-integrity patch` fills in:
+ * 99-byte integrity slot that `engrail-integrity patch` fills in:
  *
  *     #include "activation/harden.h"
  *     ACT_INTEGRITY_SLOT;
@@ -1544,27 +1550,27 @@ int act_harden_debugger_present(void);
 
 #ifdef __cplusplus
 /* C++ forbids string-literal initializers for unsigned char[]; use an
- * explicit byte list: magic(17) + end(18) + fingerprint(64) = 99. */
+ * explicit byte list: magic(17) + fingerprint(64) + end(18) = 99. */
 #  define ACT_INTEGRITY_SLOT                                                  \
     ACT_INTEGRITY_SLOT_USED                                                   \
     volatile const unsigned char act_integrity_slot[ACT_INTEGRITY_SLOT_SIZE] =\
         { 'A','C','T','-','I','N','T','E','G','R','I','T','Y','-', \
-          'V','1','!','A','C','T','-','I','N','T','E','G','R','I', \
-          'T','Y','-','E','N','D','!',0xAA,0xAA,0xAA,0xAA,0xAA,0xAA,0xAA, \
+          'V','1','!',0xAA,0xAA,0xAA,0xAA,0xAA,0xAA,0xAA,0xAA, \
           0xAA,0xAA,0xAA,0xAA,0xAA,0xAA,0xAA,0xAA,0xAA,0xAA,0xAA,0xAA,0xAA,0xAA, \
           0xAA,0xAA,0xAA,0xAA,0xAA,0xAA,0xAA,0xAA,0xAA,0xAA,0xAA,0xAA,0xAA,0xAA, \
           0xAA,0xAA,0xAA,0xAA,0xAA,0xAA,0xAA,0xAA,0xAA,0xAA,0xAA,0xAA,0xAA,0xAA, \
           0xAA,0xAA,0xAA,0xAA,0xAA,0xAA,0xAA,0xAA,0xAA,0xAA,0xAA,0xAA,0xAA,0xAA, \
-          0xAA }
+          'A','C','T','-','I','N','T','E','G','R','I','T','Y','-','E','N','D','!' }
 #else
 #  define ACT_INTEGRITY_SLOT                                                  \
     ACT_INTEGRITY_SLOT_USED                                                   \
     volatile const unsigned char act_integrity_slot[ACT_INTEGRITY_SLOT_SIZE] = \
-        ACT_INTEGRITY_MAGIC ACT_INTEGRITY_END                                 \
+        ACT_INTEGRITY_MAGIC                                                   \
         "\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa" \
         "\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa" \
         "\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa" \
-        "\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa"
+        "\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa\xaa" \
+        ACT_INTEGRITY_END
 #endif
 
 /**

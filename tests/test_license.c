@@ -464,13 +464,17 @@ int main(void)
             /* Self-integrity: an unpatched binary is tolerated (gate
              * yields ACT_ERR_STATE_MISSING internally) and verification
              * still completes. */
-            CHECK(act_verify_hardened(code, pk, 0x1234ABCD, machine, now,
-                                      0, 1, NULL) == ACT_OK,
-                  "hardened verify: unpatched binary tolerated");
+            const act_status uis = act_verify_hardened(
+                code, pk, 0x1234ABCD, machine, now, 0, 1, NULL);
+            char umsg[96];
+            snprintf(umsg, sizeof(umsg),
+                     "hardened verify: unpatched binary tolerated (got %d)",
+                     (int)uis);
+            CHECK(uis == ACT_OK, umsg);
 
             /* compute_digest on a synthetic slotted file:
-             * layout = magic || END || digest-region (any 64 bytes;
-             * the digest region is zeroed for hashing). */
+             * layout = magic || digest-region (any 64 bytes; the
+             * digest region is zeroed for hashing) || END. */
             const char *m = ACT_INTEGRITY_MAGIC;
             const char *e = ACT_INTEGRITY_END;
             uint8_t junk[64];
@@ -478,8 +482,8 @@ int main(void)
             FILE *f = fopen("test_synth.tmp", "wb");
             fwrite("HELLO", 1, 5, f);
             fwrite(m, 1, ACT_INTEGRITY_MAGIC_LEN, f);
-            fwrite(e, 1, ACT_INTEGRITY_END_LEN, f);
             fwrite(junk, 1, 64, f);
+            fwrite(e, 1, ACT_INTEGRITY_END_LEN, f);
             fwrite("WORLD", 1, 5, f);
             fclose(f);
 
@@ -494,8 +498,8 @@ int main(void)
             act_sha512_init(&c);
             act_sha512_update(&c, "HELLO", 5);
             act_sha512_update(&c, m, ACT_INTEGRITY_MAGIC_LEN);
-            act_sha512_update(&c, e, ACT_INTEGRITY_END_LEN);
             act_sha512_update(&c, zeros, 64);
+            act_sha512_update(&c, e, ACT_INTEGRITY_END_LEN);
             act_sha512_update(&c, "WORLD", 5);
             act_sha512_final(&c, ref);
             CHECK(act_secure_memcmp(dg, ref, 64) == 0,

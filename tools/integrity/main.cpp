@@ -72,7 +72,7 @@ int collect_slots(FILE *f, SlotKind want, const uint8_t *expected,
         for (size_t i = 0; i + ACT_INTEGRITY_SLOT_SIZE <= have; i++) {
             if (memcmp(win + i, ACT_INTEGRITY_MAGIC,
                        ACT_INTEGRITY_MAGIC_LEN) != 0 ||
-                memcmp(win + i + ACT_INTEGRITY_MAGIC_LEN,
+                memcmp(win + i + ACT_INTEGRITY_END_OFF,
                        ACT_INTEGRITY_END, ACT_INTEGRITY_END_LEN) != 0) {
                 continue;
             }
@@ -122,7 +122,7 @@ SlotKind scan_slots(FILE *f, const uint8_t *expected, long *slot_off)
         for (size_t i = 0; i + ACT_INTEGRITY_SLOT_SIZE <= have; i++) {
             if (memcmp(win + i, ACT_INTEGRITY_MAGIC,
                        ACT_INTEGRITY_MAGIC_LEN) != 0 ||
-                memcmp(win + i + ACT_INTEGRITY_MAGIC_LEN,
+                memcmp(win + i + ACT_INTEGRITY_END_OFF,
                        ACT_INTEGRITY_END, ACT_INTEGRITY_END_LEN) != 0) {
                 continue;
             }
