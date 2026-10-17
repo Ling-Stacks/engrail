@@ -1,0 +1,32 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build amalgamation + crypto dist + source archive
+        run: |
+          ./configure --enable-shared
+          make
+          make check
+          make amalgamation
+          cd dist && tar czf ../engrail-amalgamation.tar.gz * && cd ..
+          sh crypto/build.sh
+          tar czf engrail-crypto.tar.gz -C crypto/dist engrail_crypto.h engrail_crypto.c
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            engrail-amalgamation.tar.gz
+            engrail-crypto.tar.gz
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

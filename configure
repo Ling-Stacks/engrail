@@ -1,0 +1,803 @@
+#!/bin/sh
+#  configure -- ActivationSystem build configuration
+#  autotools-style: 60+ live checks + exhaustive config.log
+#
+#  ./configure [options] [VAR=VALUE ...]
+#
+#  Options:
+#    --prefix=PATH        install prefix             (default /usr/local)
+#    --cc=  --cxx=  --ar= toolchain override
+#    --cflags=  --cxxflags=  --ldflags=  extra flags
+#    --enable-shared      also build libactivation.so
+#    --disable-tests / --disable-tools / --disable-examples / --disable-bench
+#    --quiet              suppress live lines (log still complete)
+#    --help
+#
+#  Artifacts: Makefile CMakeLists.txt config.vars config.log
+#  Reset:     bash clean.sh
+set -u
+
+# ---- defaults -------------------------------------------------
+PREFIX=/usr/local
+CC=${CC:-}
+CXX=${CXX:-}
+AR=${AR:-ar}
+CFLAGS=${CFLAGS:--O2}
+CXXFLAGS=${CXXFLAGS:--O2}
+LDFLAGS=${LDFLAGS:-}
+BUILD_TESTS=yes
+BUILD_TOOLS=yes
+BUILD_EXAMPLES=yes
+BUILD_BENCH=yes
+BUILD_SHARED=no
+QUIET=no
+
+LOG=config.log
+: > "$LOG" 2>/dev/null || LOG=/dev/null
+
+# ---- infrastructure -------------------------------------------
+die() {
+    printf 'configure: error: %s\n' "$*" >&2
+    printf 'configure: error: %s\n' "$*" >> "$LOG" 2>/dev/null
+    exit 1
+}
+log()  { printf '%s\n' "$*" >> "$LOG" 2>/dev/null; }
+sep()  { :; }
+
+say() {  # $1 = "for X" / "whether Y"; prints "checking for X... "
+    if [ "$QUIET" != yes ]; then printf 'checking %s... ' "$1"; fi
+}
+done_() {  # verdict: $1=yes/no/text
+    if [ "$QUIET" != yes ]; then printf '%s\n' "$1"; fi
+    log "  -> $1"
+}
+
+# chk TEXT CMD... -> runs CMD; logs output; prints yes/no
+chk() {
+    _t="$1"; shift
+    say "$_t"
+    log ""
+    log "checking $_t"
+    sep
+    if "$@" >> "$LOG" 2>&1; then
+        log ""
+        done_ yes
+        return 0
+    fi
+    rc=$?
+    log "  (exit $rc)"
+    log "---- failed command output ----"
+    done_ no
+    return 1
+}
+
+N_OK=0; N_WARN=0; N_NO=0
+ok()   { N_OK=$((N_OK+1)); }
+warn() { N_WARN=$((N_WARN+1)); }
+skip() { N_NO=$((N_NO+1)); }
+
+# ---- log header (bash-style structured record) -----------------
+{
+    echo "This file contains any messages produced by compilers while"
+    echo "running configure, to aid debugging if configure makes a mistake."
+    echo ""
+    echo "It was created by ActivationSystem configure."
+    echo "Invocation command line was"
+    echo ""
+    echo "  \$ $0 $*"
+    echo ""
+    echo "## --------- ##"
+    echo "## Platform. ##"
+    echo "## --------- ##"
+    echo ""
+    echo "hostname = $(hostname 2>/dev/null || uname -n 2>/dev/null || echo unknown)"
+    echo "uname -m = $(uname -m 2>/dev/null || echo unknown)"
+    echo "uname -r = $(uname -r 2>/dev/null || echo unknown)"
+    echo "uname -s = $(uname -s 2>/dev/null || echo unknown)"
+    echo "uname -v = $(uname -v 2>/dev/null || echo unknown)"
+    echo ""
+    echo "/usr/bin/uname -p = $(uname -p 2>/dev/null || echo unknown)"
+    echo "/bin/uname -X     = $(uname -X 2>/dev/null || echo unknown)"
+    echo ""
+    echo "/bin/arch              = $(arch 2>/dev/null || echo unknown)"
+    echo "/usr/bin/arch -k       = $(arch -k 2>/dev/null || echo unknown)"
+    echo "/usr/bin/hostinfo      = $(hostinfo 2>/dev/null || echo unknown)"
+    echo "/bin/machine           = $(machine 2>/dev/null || echo unknown)"
+    echo "/usr/bin/oslevel       = $(oslevel 2>/dev/null || echo unknown)"
+    echo "/bin/universe          = $(universe 2>/dev/null || echo unknown)"
+    echo ""
+    echo "PATH: "
+    echo "$PATH" | tr ':' '\n' | sed 's/^/  /'
+    echo ""
+    echo "## ------------ ##"
+    echo "## Core tests. ##"
+    echo "## ------------ ##"
+    echo ""
+} >> "$LOG"
+
+sep
+
+# ---- help -----------------------------------------------------
+case " $* " in
+    *" --help "*|*" -h "*)
+        sed -n '4,23p' "$0" | sed 's/^#//;s/^ //'
+        exit 0 ;;
+esac
+
+# ---- arguments ------------------------------------------------
+for arg in "$@"; do
+    case "$arg" in
+        --prefix=*)         PREFIX=${arg#--prefix=} ;;
+        --cc=*)             CC=${arg#--cc=} ;;
+        --cxx=*)            CXX=${arg#--cxx=} ;;
+        --ar=*)             AR=${arg#--ar=} ;;
+        --cflags=*)         CFLAGS="${CFLAGS} ${arg#--cflags=}" ;;
+        --cxxflags=*)       CXXFLAGS="${CXXFLAGS} ${arg#--cxxflags=}" ;;
+        --ldflags=*)        LDFLAGS="${LDFLAGS} ${arg#--ldflags=}" ;;
+        --enable-shared)    BUILD_SHARED=yes ;;
+        --disable-shared)   BUILD_SHARED=no ;;
+        --enable-tests)     BUILD_TESTS=yes ;;
+        --disable-tests)    BUILD_TESTS=no ;;
+        --enable-tools)     BUILD_TOOLS=yes ;;
+        --disable-tools)    BUILD_TOOLS=no ;;
+        --enable-examples)  BUILD_EXAMPLES=yes ;;
+        --disable-examples) BUILD_EXAMPLES=no ;;
+        --enable-bench)     BUILD_BENCH=yes ;;
+        --disable-bench)    BUILD_BENCH=no ;;
+        --quiet|-q)         QUIET=yes ;;
+        *=*)                eval "$arg" ;;
+        *)                  die "unknown option: $arg (try --help)" ;;
+    esac
+done
+
+T=$(mktemp -d) || die "mktemp failed"
+trap 'rm -rf "$T"' EXIT
+
+OS_NAME=$(uname -s 2>/dev/null || echo Unknown)
+case "$OS_NAME" in
+    Linux*)
+        if uname -o 2>/dev/null | grep -q Android; then OS_PRETTY=Android
+        elif [ -f /system/build.prop ]; then OS_PRETTY=Android
+        elif [ -d /system/app ] && [ -d /system/priv-app ]; then OS_PRETTY=Android
+        else OS_PRETTY=Linux; fi ;;
+    Darwin*)    OS_PRETTY=MacOS ;;
+    MINGW*|MSYS*|CYGWIN*|Windows_NT*) OS_PRETTY=Windows ;;
+    FreeBSD*)   OS_PRETTY=FreeBSD ;;
+    OpenBSD*)   OS_PRETTY=OpenBSD ;;
+    *)          OS_PRETTY=Unknown ;;
+esac
+
+case "$OS_PRETTY" in
+    Android)  FLAVOR="green robot territory" ;;
+    Linux)    FLAVOR="penguin approved" ;;
+    MacOS)    FLAVOR="fruit-flavored unix" ;;
+    Windows)  FLAVOR="win32 dialect supported" ;;
+    FreeBSD)  FLAVOR="the devil you know" ;;
+    OpenBSD)  FLAVOR="pufferfish guarded" ;;
+    *)        FLAVOR="uncharted waters" ;;
+esac
+
+printf '\n'
+printf '  Engrail configure  //  %s (%s)\n' "$OS_PRETTY" "$(uname -m 2>/dev/null)"
+printf '  kernel %s  --  %s\n' "$(uname -r 2>/dev/null | cut -c1-24)" "$FLAVOR"
+printf '  interlocking offline licensing\n\n'
+printf 'building in %s; log: %s\n\n' "$(pwd)" "$LOG"
+
+# ================================================================
+# SECTION 1: host platform (all logged)
+# ================================================================
+for t in uname date pwd id env; do
+    chk "host $t" "$t"
+done
+chk "host kernel" uname -s
+chk "host machine" uname -m
+chk "host release" uname -r
+HW=$(uname -m 2>/dev/null || echo unknown)
+
+# ================================================================
+# SECTION 2: toolchain discovery
+# ================================================================
+say "for a C compiler"
+if [ -n "$CC" ]; then
+    done_ "$CC (user-specified)"
+    ok
+else
+    for c in cc clang gcc; do
+        command -v "$c" >/dev/null 2>&1 && CC="$c" && break
+    done
+    if [ -n "$CC" ]; then done_ "$CC"; ok; else done_ "not found"; die "no C compiler (try --cc=...)"; fi
+fi
+
+say "for a C++ compiler"
+if [ -n "$CXX" ]; then
+    done_ "$CXX (user-specified)"
+    ok
+else
+    for c in c++ clang++ g++; do
+        command -v "$c" >/dev/null 2>&1 && CXX="$c" && break
+    done
+    if [ -n "$CXX" ]; then done_ "$CXX"; ok; else done_ "not found"; die "no C++ compiler (try --cxx=...)"; fi
+fi
+
+chk "for archiver" command -v "$AR" && ok || die "archiver not found: $AR"
+chk "for C compiler absolute path" command -v "$CC" && ok || die "C compiler vanished: $CC"
+chk "for C++ compiler absolute path" command -v "$CXX" && ok || die "C++ compiler vanished: $CXX"
+
+CCVER=$("$CC" --version 2>/dev/null | head -1)
+say "C compiler identity"; done_ "${CCVER:-unknown}"; log "  $CC --version: $CCVER"; ok
+CXXVER=$("$CXX" --version 2>/dev/null | head -1)
+say "C++ compiler identity"; done_ "${CXXVER:-unknown}"; log "  $CXX --version: $CXXVER"; ok
+
+# ================================================================
+# SECTION 3: C compiler functionality (12 probes)
+# ================================================================
+cat > "$T/hello.c" <<'EOF'
+#include <stdio.h>
+int main(void) { printf("ok\n"); return 0; }
+EOF
+
+cat > "$T/bigint.c" <<'EOF'
+#include <stdio.h>
+#include <stdint.h>
+int main(void) {
+    uint64_t x = 1;
+    printf("%llu\n", (unsigned long long)(x << 40));
+    return 0;
+}
+EOF
+
+cat > "$T/c99.c" <<'EOF'
+#include <stdint.h>
+#include <string.h>
+#include <stdio.h>
+int main(void) {
+    for (int i = 0; i < 3; i++) {}
+    uint8_t b[4] = {0};
+    uint64_t v = 0;
+    return (int)b[0] + (int)(v >> 63);
+}
+EOF
+
+cat > "$T/c99flags.c" <<'EOF'
+#include <stdint.h>
+#include <string.h>
+int f(const volatile uint8_t *p) { return p[0]; }
+int main(void) { uint8_t b = 1; return f(&b) - 1; }
+EOF
+
+cat > "$T/snz.c" <<'EOF'
+#include <stdio.h>
+int main(void) { char b[8]; return snprintf(b, sizeof b, "%d", 7) < 0; }
+EOF
+
+cat > "$T/unalign.c" <<'EOF'
+#include <stdint.h>
+#include <string.h>
+int main(void) {
+    uint8_t buf[9];
+    uint32_t v = 0;
+    memcpy(buf, "123456789", 9);
+    memcpy(&v, buf + 1, 4);
+    return (int)(v & 1);
+}
+EOF
+
+cat > "$T/endian.c" <<'EOF'
+#include <stdio.h>
+#include <stdint.h>
+int main(void) {
+    const uint32_t x = 0x01020304;
+    const uint8_t *p = (const uint8_t *)&x;
+    printf("%s\n", p[0] == 0x04 ? "little" : (p[0] == 0x01 ? "big" : "mixed"));
+    return 0;
+}
+EOF
+
+cat > "$T/wchar.c" <<'EOF'
+#include <stdio.h>
+int main(void) { printf("%zu\n", sizeof(void *)); return 0; }
+EOF
+
+chk "whether the C compiler works" \
+    sh -c '"$1" $2 -o "$3/hello" "$3/hello.c" && "$3/hello"' x "$CC" "$CFLAGS" "$T" \
+    && ok || die "C compiler cannot build and run a test program"
+log "hello.c:"; sed 's/^/  | /' "$T/hello.c" >> "$LOG"
+
+chk "whether 64-bit integers work" \
+    sh -c '"$1" $2 -o "$3/big" "$3/bigint.c" && [ "$("$3/big")" = 1099511627776 ]' x "$CC" "$CFLAGS" "$T" \
+    && ok || die "64-bit arithmetic broken"
+
+CSTD_FLAG="-std=gnu99"
+chk "whether the C compiler accepts -std=gnu99" \
+    sh -c '"$1" -std=gnu99 -o "$2/c99" "$2/c99.c"' x "$CC" "$T"
+if [ $? -eq 0 ]; then
+    ok
+else
+    CSTD_FLAG="-std=c99"
+    chk "fallback: -std=c99" \
+        sh -c '"$1" -std=c99 -o "$2/c99" "$2/c99.c"' x "$CC" "$T" \
+        && ok || die "C99 unsupported (try --cflags=)"
+fi
+log "c99.c:"; sed 's/^/  | /' "$T/c99.c" >> "$LOG"
+
+chk "whether $CSTD_FLAG -Wall -Wextra -Werror is clean" \
+    sh -c '"$1" $5 -Wall -Wextra -Werror -o "$2/c99f" "$2/c99flags.c"' x "$CC" "$T" "$CSTD_FLAG" \
+    && ok || die "cannot build warning-clean C99 (project enforces -Werror)"
+
+chk "for snprintf" \
+    sh -c '"$1" -std=c99 -Werror -o "$2/snz" "$2/snz.c" && "$2/snz"' x "$CC" "$T" \
+    && ok || warn
+
+chk "for memcpy/memset (string.h)" \
+    sh -c '"$1" -std=c99 -Werror -o "$2/una" "$2/unalign.c" && "$2/una"' x "$CC" "$T" \
+    && ok || die "string.h functions broken"
+
+chk "for unaligned-safe loads" \
+    sh -c '"$1" -O2 -std=c99 -o "$2/una2" "$2/unalign.c" && "$2/una2"' x "$CC" "$T" \
+    && ok || warn
+
+"$CC" $CFLAGS -o "$T/end" "$T/endian.c" >> "$LOG" 2>&1
+ENDIAN=$("$T/end" 2>/dev/null || echo unknown)
+say "byte order"; done_ "$ENDIAN"; ok
+
+"$CC" $CFLAGS -o "$T/wid" "$T/wchar.c" >> "$LOG" 2>&1
+PTRSZ=$("$T/wid" 2>/dev/null || echo "?")
+say "pointer width"; done_ "$PTRSZ bytes"; ok
+
+for f in -O0 -O1 -O2 -O3 -Os -g -fPIC -MMD; do
+    chk "whether $CC accepts $f" \
+        sh -c '"$1" $2 -c -o "$3/x.o" "$3/hello.c"' x "$CC" "$f" "$T" && ok || skip
+done
+
+# ================================================================
+# SECTION 4: C++ compiler functionality (6 probes)
+# ================================================================
+cat > "$T/hello.cpp" <<'EOF'
+#include <iostream>
+int main() { std::cout << "ok" << std::endl; return 0; }
+EOF
+
+cat > "$T/cpp17.cpp" <<'EOF'
+#include <cstdio>
+#include <string>
+#include <vector>
+#include <memory>
+#include <array>
+struct P { int x; };
+int main() {
+    auto s = std::string("x") + std::string("y");
+    auto v = std::vector<int>{1, 2, 3};
+    auto p = std::make_unique<P>(P{7});
+    auto a = std::array<int, 3>{1, 2, 3};
+    if (s != "xy" || v.size() != 3 || !p || a[2] != 3) return 1;
+    return 0;
+}
+EOF
+
+chk "whether the C++ compiler works" \
+    sh -c '"$1" $2 -static-libstdc++ -o "$3/hp" "$3/hello.cpp" && "$3/hp" >/dev/null' x "$CXX" "$CXXFLAGS" "$T" \
+    && ok || die "C++ compiler cannot build and run"
+
+chk "whether $CXX accepts -std=c++17 -Wall -Wextra -Werror" \
+    sh -c '"$1" -std=c++17 -Wall -Wextra -Werror -static-libstdc++ -o "$2/p17" "$2/cpp17.cpp" && "$2/p17"' x "$CXX" "$T" \
+    && ok || die "C++17 toolchain broken: vendor CLI / C++ wrapper cannot build"
+log "cpp17.cpp:"; sed 's/^/  | /' "$T/cpp17.cpp" >> "$LOG"
+
+for f in -std=c++11 -std=c++14 -std=c++17 -std=c++20; do
+    chk "whether $CXX accepts $f" \
+        sh -c '"$1" $2 -fsyntax-only "$3/hello.cpp"' x "$CXX" "$f" "$T" && ok || skip
+done
+
+chk "whether $CXX links with -static-libstdc++" \
+    sh -c '"$1" -static-libstdc++ -o "$2/slx" "$2/hello.cpp"' x "$CXX" "$T" \
+    && ok || die "static C++ runtime linking unsupported"
+
+# ================================================================
+# SECTION 5: library tooling (ar, shared, ranlib, pkg-config)
+# ================================================================
+cat > "$T/a.c" <<'EOF'
+int probe_fn(void) { return 7; }
+EOF
+
+"$CC" -c -o "$T/a.o" "$T/a.c" >> "$LOG" 2>&1
+
+chk "whether $AR creates static archives" \
+    sh -c '"$1" rcs "$2/libprobe.a" "$2/a.o" && test -s "$2/libprobe.a"' x "$AR" "$T" \
+    && ok || die "archiver cannot create archives"
+
+chk "whether $AR table works (ar t)" \
+    sh -c '"$1" t "$2/libprobe.a" | grep -q a.o' x "$AR" "$T" && ok || warn
+
+if command -v ranlib >/dev/null 2>&1; then
+    chk "for ranlib" ranlib "$T/libprobe.a" && ok || warn
+else
+    say "for ranlib"; done_ "not found (ar s flag covers it)"; skip
+fi
+
+chk "whether linking against a static archive works" \
+    sh -c 'cat > "$2/main.c" <<EOF
+extern int probe_fn(void);
+int main(void){return probe_fn()==7?0:1;}
+EOF
+"$3" -o "$2/lk" "$2/main.c" "$2/libprobe.a" && "$2/lk"' x "$CC" "$T" "$CC" \
+    && ok || die "cannot link against static archives"
+
+if [ "$BUILD_SHARED" = yes ]; then
+    chk "whether $CC builds shared objects (-shared -fPIC)" \
+        sh -c '"$1" -shared -fPIC -o "$2/libprobe.so" "$2/a.o"' x "$CC" "$T" \
+        && ok || die "shared libraries requested but unsupported"
+else
+    say "whether shared-object support is available"; done_ "not requested"; skip
+fi
+
+if command -v pkg-config >/dev/null 2>&1; then
+    chk "for pkg-config" pkg-config --version && ok
+else
+    say "for pkg-config"; done_ "not found (pc file still installed)"; skip
+fi
+
+# ================================================================
+# SECTION 6: system headers & functions (7 probes)
+# ================================================================
+chk "for stdint.h" sh -c 'echo "#include <stdint.h>" | "$1" -std=c99 -fsyntax-only -x c -' x "$CC" && ok || die "stdint.h missing"
+chk "for stddef.h" sh -c 'echo "#include <stddef.h>" | "$1" -std=c99 -fsyntax-only -x c -' x "$CC" && ok || die "stddef.h missing"
+chk "for string.h" sh -c 'echo "#include <string.h>" | "$1" -std=c99 -fsyntax-only -x c -' x "$CC" && ok || die "string.h missing"
+
+for h in unistd.h fcntl.h errno.h time.h; do
+    chk "for $h" \
+        sh -c 'echo "#include <$2>" | "$1" -std=c99 -fsyntax-only -x c -' x "$CC" "$h" \
+        && ok || warn
+done
+
+for fn in fopen fread fwrite fseek ftell remove; do
+    chk "for $fn" \
+        sh -c 'echo "#include <stdint.h>
+#include <stdio.h>
+int main(void){ return (int)(intptr_t)$2; }" | "$1" -std=c99 -fsyntax-only -x c -' x "$CC" "$fn" \
+        && ok || warn
+done
+
+# ================================================================
+# SECTION 6.5: runtime semantics (bash-style behavioral checks)
+# ================================================================
+cat > "$T/decl.c" <<'EOF'
+#include <stdio.h>
+int main(void) { return printf("%d", 1) < 0; }
+EOF
+
+for fn in printf puts fflush fgets fputs ferror fclose malloc free exit abort getenv; do
+    chk "for $fn declaration" \
+        sh -c 'printf "#include <stdio.h>\n#include <stdlib.h>\nint main(void){return (int)(long)$2;}" | "$1" -std=c99 -Werror -fsyntax-only -x c -' x "$CC" "$fn" \
+        && ok || warn
+done
+
+chk "whether printf handles %zu (C99)" \
+    sh -c 'printf "#include <stdio.h>\nint main(){printf(\"%%zu\", (size_t)1);return 0;}" | "$1" -std=c99 -Werror -fsyntax-only -x c -' x "$CC" \
+    && ok || warn
+
+chk "whether printf handles %llu (C99)" \
+    sh -c 'printf "#include <stdio.h>\nint main(){printf(\"%%llu\", (unsigned long long)1);return 0;}" | "$1" -std=c99 -Werror -fsyntax-only -x c -' x "$CC" \
+    && ok || warn
+
+cat > "$T/const.c" <<'EOF'
+#include <string.h>
+int main(void) {
+    const char s[] = "x";
+    char d[2];
+    return (int)strlen(s) + (int)sizeof(d) - 2;
+}
+EOF
+chk "whether const-qualified arrays compile in C99" \
+    sh -c '"$1" -std=c99 -Wall -Wextra -Werror -o "$2/const" "$2/const.c"' x "$CC" "$T" && ok || warn
+
+cat > "$T/volatile.c" <<'EOF'
+#include <stdint.h>
+static volatile int guard = 0;
+int main(void) { guard = 1; return guard - 1; }
+EOF
+chk "whether volatile survives -O2 (no elision)" \
+    sh -c '"$1" -O2 -std=c99 -Wall -Werror -o "$2/vol" "$2/volatile.c" && "$2/vol"' x "$CC" "$T" && ok || warn
+
+cat > "$T/shift.c" <<'EOF'
+#include <stdio.h>
+#include <stdint.h>
+int main(void) {
+    const uint32_t x = 0x01020304;
+    const uint32_t r = (x >> 24) | ((x >> 8) & 0xFF00) | ((x << 8) & 0xFF0000) | (x << 24);
+    printf("%08x\n", r);
+    return 0;
+}
+EOF
+chk "whether 32-bit shifts compose correctly" \
+    sh -c '"$1" -O2 -o "$2/sh" "$2/shift.c" && [ "$("$2/sh")" = "04030201" ]' x "$CC" "$T" && ok || warn
+
+cat > "$T/stk.c" <<'EOF'
+#include <stdint.h>
+#include <string.h>
+static uint64_t f(int n) {
+    uint64_t buf[512];
+    memset(buf, 0, sizeof buf);
+    return n > 1 ? f(n - 1) + buf[0] : buf[0];
+}
+int main(void) { return (int)f(64); }
+EOF
+chk "whether 4KB stack frames are safe" \
+    sh -c '"$1" -O2 -o "$2/stk" "$2/stk.c" && "$2/stk"' x "$CC" "$T" && ok || warn
+
+# ================================================================
+# SECTION 6.7: cross-compilation heuristic (bash-style)
+# ================================================================
+say "whether we are cross compiling"
+if "$CC" $CFLAGS -o "$T/cross" "$T/hello.c" >> "$LOG" 2>&1; then
+    if "$T/cross" >> "$LOG" 2>&1; then
+        done_ no
+        CROSS=no
+    else
+        done_ yes
+        CROSS=yes
+        log "  compiled binary does not run on this host"
+    fi
+    ok
+else
+    done_ unknown
+    warn
+    CROSS=unknown
+fi
+
+say "for suffix of executables"
+# NB: a plain `[ -f exe ]` under MSYS2 reports the auto-suffixed
+# exe.exe too, which used to make the first branch win wrongly.
+# Decide by toolchain family, then verify the file really exists.
+case "$(uname -s 2>/dev/null || echo unknown):$CC" in
+    MINGW*:*|MSYS*:*|CYGWIN*:*|*:cl|*:cl.exe)
+        WANT_EXT=".exe" ;;
+    *) WANT_EXT="" ;;
+esac
+rm -f "$T"/exe "$T"/exe.exe
+if "$CC" $CFLAGS -o "$T/exe$WANT_EXT" "$T/hello.c" >> "$LOG" 2>&1 && \
+   [ -f "$T/exe$WANT_EXT" ]; then
+    done_ "${WANT_EXT:-(none)}"
+    EXEEXT="$WANT_EXT"
+else
+    done_ unknown
+    EXEEXT=""
+fi
+ok
+
+say "for shared-library suffix"
+case "$(uname -s 2>/dev/null || echo unknown)" in
+    MINGW*|MSYS*|CYGWIN*) SHARED_EXT=".dll" ;;
+    Darwin*)              SHARED_EXT=".dylib" ;;
+    *)                    SHARED_EXT=".so" ;;
+esac
+done_ "$SHARED_EXT"
+ok
+
+say "for suffix of object files"
+OBJEXT="o"
+"$CC" -c -o "$T/obj.o" "$T/hello.c" >> "$LOG" 2>&1 && [ -f "$T/obj.o" ] && OBJEXT="o"
+if [ "$(uname -s 2>/dev/null)" = "Windows_NT" ] && [ -f "$T/obj.obj" ]; then
+    OBJEXT="obj"
+fi
+done_ ".$OBJEXT"
+ok
+
+say "whether the compiler is GCC-compatible"
+# NB: plain -E EXPANDS __GNUC__ to a number, so grepping for the macro
+# name in preprocessed output is always false on GCC and accidentally
+# true elsewhere. -dM dumps the macro table instead.
+if echo | "$CC" -E -dM -x c - 2>/dev/null | grep -q "define __GNUC__"; then
+    done_ yes
+    GNUCC=yes
+else
+    done_ "not detected"
+    GNUCC=no
+fi
+ok
+
+# ================================================================
+# SECTION 6.9: size of fundamental types (runtime probes)
+# ================================================================
+for ty in char short int long "long long" "void *" size_t; do
+    cat > "$T/sz.c" <<EOF
+#include <stdio.h>
+#include <stddef.h>
+int main(void) { printf("%zu\n", sizeof($ty)); return 0; }
+EOF
+    "$CC" $CFLAGS -o "$T/sz" "$T/sz.c" >> "$LOG" 2>&1
+    SZ=$("$T/sz" 2>/dev/null || echo "?")
+    say "size of $ty"
+    done_ "${SZ} bytes"
+    [ "$SZ" != "?" ] && ok || warn
+done
+
+# ================================================================
+# SECTION 6.95: signal / process sanity
+# ================================================================
+cat > "$T/sig.c" <<'EOF'
+#include <signal.h>
+#include <stdio.h>
+int main(void) {
+    printf("%d\n", SIGSEGV > 0 && SIGILL > 0 && SIGFPE > 0);
+    return 0;
+}
+EOF
+chk "whether signal.h defines standard signals" \
+    sh -c '"$1" -std=c99 -o "$2/sig" "$2/sig.c" && [ "$("$2/sig")" = "1" ]' x "$CC" "$T" && ok || warn
+
+cat > "$T/getpid.c" <<'EOF'
+#include <unistd.h>
+#include <stdio.h>
+int main(void) { printf("%d\n", getpid() > 0); return 0; }
+EOF
+if [ "$(uname -s 2>/dev/null)" != "Windows_NT" ]; then
+    chk "whether getpid() is available" \
+        sh -c '"$1" -std=c99 -o "$2/gp" "$2/getpid.c" && [ "$("$2/gp")" = "1" ]' x "$CC" "$T" && ok || warn
+else
+    say "whether getpid() is available"; done_ "POSIX-only, skipped on Windows"; skip
+fi
+
+# ================================================================
+# SECTION 7: project tree (30 files, version, sources parse)
+# ================================================================
+say "project tree completeness"
+MISS=0; MISSLIST=""
+for f in \
+    include/activation/license.h include/activation/ed25519.h \
+    include/activation/sm2.h include/activation/harden.h \
+    include/activation/audit.h include/activation/version.h \
+    src/crypto/sha512.c src/crypto/ed25519.c src/crypto/sm2.c \
+    src/crypto/sm3.c src/crypto/random.c src/crypto/chacha20.c \
+    src/crypto/hmac.c src/core/license.c src/core/fingerprint.c \
+    src/core/state.c src/core/revoke.c src/core/token.c \
+    src/core/harden.c src/core/kdf.c src/core/keyfile.c \
+    src/core/audit.c src/core/activation.cpp \
+    tools/keygen/main.cpp tools/integrity/main.cpp tools/bench/main.cpp \
+    tests/smoke.c tests/run_all.sh \
+    Makefile.in CMakeLists.txt.in activation.pc.in; do
+    if [ ! -f "$f" ]; then
+        MISS=$((MISS+1)); MISSLIST="$MISSLIST $f"; log "  MISSING: $f"
+    fi
+done
+if [ "$MISS" -eq 0 ]; then done_ "all 32 files present"; ok
+else done_ "$MISS missing"; die "incomplete checkout:$MISSLIST"; fi
+
+say "project version"
+VERSION=$(sed -n 's/^#define ACT_VERSION *"\([^"]*\)"/\1/p' include/activation/version.h)
+if [ -n "$VERSION" ]; then done_ "v$VERSION"; ok
+else done_ "unreadable"; die "cannot parse version.h"; fi
+
+chk "that every registered C source compiles to an object" \
+    sh -c 'for src in src/crypto/sha512.c src/crypto/hmac.c src/crypto/ed25519.c src/crypto/random.c src/crypto/chacha20.c src/crypto/sm3.c src/crypto/sm2.c; do
+        "$1" -std=c99 -Wall -Wextra -Werror -Iinclude -c "$src" -o "$2/$(basename "$src").o" || exit 1
+    done' x "$CC" "$T" \
+    && ok || die "crypto layer does not compile cleanly on this toolchain"
+log "(each crypto source compiled -Wall -Wextra -Werror)"
+
+# ================================================================
+# SECTION 8: optional tooling (non-fatal)
+# ================================================================
+chk "for python3" command -v python3 && ok || { skip; }
+PY3VER=$(python3 --version 2>/dev/null || echo "none")
+say "python3 version"; done_ "$PY3VER"; log "  $PY3VER"; [ "$PY3VER" != none ] && ok || skip
+
+chk "for cmake" command -v cmake && ok || { say "cmake"; done_ "absent, Make workflow unaffected"; skip; }
+chk "for git" command -v git && ok || skip
+chk "for bash" command -v bash && ok || skip
+chk "for make" command -v make && ok || die "make not found -- cannot build"
+
+MAKEVER=$(make --version 2>/dev/null | head -1 || echo none)
+say "make version"; done_ "${MAKEVER:-unknown}"; ok
+
+chk "for install(1)" command -v install && ok || { say "install(1)"; done_ "absent: make install disabled"; warn; }
+
+# ================================================================
+# SECTION 9: filesystem
+# ================================================================
+chk "whether the build directory is writable" \
+    sh -c 'touch .probe.$$ && rm -f .probe.$$' && ok || die "cannot write to $(pwd)"
+
+chk "whether a build subdirectory can be created" \
+    sh -c 'mkdir -p "$1/sanity.d" && rmdir "$1/sanity.d"' x "$T" && ok || warn
+
+# ================================================================
+# generate outputs
+# ================================================================
+EXEC_PREFIX='$$(PREFIX)'
+BINDIR='$$(EXEC_PREFIX)/bin'
+LIBDIR='$$(EXEC_PREFIX)/lib'
+INCLUDEDIR='$$(EXEC_PREFIX)/include'
+PKGCONFIGDIR='$$(LIBDIR)/pkgconfig'
+
+CRYPTO_SRCS="src/crypto/sha512.c src/crypto/hmac.c src/crypto/ed25519.c src/crypto/random.c src/crypto/chacha20.c src/crypto/sm3.c src/crypto/sm2.c"
+CORE_C_SRCS="src/core/fingerprint.c src/core/kdf.c src/core/keyfile.c src/core/audit.c src/core/license.c src/core/state.c src/core/revoke.c src/core/token.c src/core/harden.c"
+CORE_CXX_SRCS="src/core/activation.cpp"
+TEST_SRCS="tests/test_hmac.c tests/test_ed25519.c tests/test_license.c tests/test_sm2.c tests/test_random.c tests/test_kdf.c tests/test_dual.c tests/test_harden.c tests/test_fuzz.c tests/test_lifecycle.c"
+
+CMAKE_SRC_LIST=$(printf '%s;%s;%s;' "$CRYPTO_SRCS" "$CORE_C_SRCS" "src/core/activation.cpp" | sed 's/  */;/g')
+CMAKE_TEST_LIST=$(printf '%s;' "$TEST_SRCS" | sed 's|tests/||g;s/  */;/g;s/\.c//g')
+
+[ -f Makefile.in ] || die "Makefile.in missing"
+[ -f CMakeLists.txt.in ] || die "CMakeLists.txt.in missing"
+
+sed \
+    -e "s|@CC@|$CC|g" -e "s|@CXX@|$CXX|g" -e "s|@AR@|$AR|g" \
+    -e "s|@CFLAGS@|$CFLAGS|g" -e "s|@CXXFLAGS@|$CXXFLAGS|g" \
+    -e "s|@LDFLAGS@|$LDFLAGS|g" -e "s|@LDFLAGS_CXX@|-static-libstdc++|g" \
+    -e "s|@WARN_CFLAGS@|-Wall -Wextra -Werror|g" \
+    -e "s|@WARN_CXXFLAGS@|-Wall -Wextra -Werror|g" \
+    -e "s|@CSTD@|$CSTD_FLAG|g" -e "s|@CXXSTD@|-std=c++17|g" \
+    -e "s|@PREFIX@|$PREFIX|g" -e "s|@EXEC_PREFIX@|$EXEC_PREFIX|g" \
+    -e "s|@BINDIR@|$BINDIR|g" -e "s|@LIBDIR@|$LIBDIR|g" \
+    -e "s|@INCLUDEDIR@|$INCLUDEDIR|g" -e "s|@PKGCONFIGDIR@|$PKGCONFIGDIR|g" \
+    -e "s|@VERSION@|$VERSION|g" -e "s|@LIB_NAME@|libactivation|g" \
+    -e "s|@SHARED_EXT@|$SHARED_EXT|g" -e "s|@EXEEXT@|$EXEEXT|g" \
+    -e "s|@INCLUDE_DIR@|-Iinclude|g" \
+    -e "s|@BUILD_TESTS@|$BUILD_TESTS|g" -e "s|@BUILD_TOOLS@|$BUILD_TOOLS|g" \
+    -e "s|@BUILD_EXAMPLES@|$BUILD_EXAMPLES|g" -e "s|@BUILD_BENCH@|$BUILD_BENCH|g" \
+    -e "s|@BUILD_SHARED@|$BUILD_SHARED|g" \
+    -e "s|@CRYPTO_DIR@|src/crypto|g" -e "s|@CORE_DIR@|src/core|g" \
+    -e "s|@BUILD_DIR@|build|g" -e "s|@DIST_DIR@|dist|g" \
+    -e "s|@PROJECT_NAME@|ActivationSystem|g" \
+    -e "s|@KEYGEN_SRCS@|tools/keygen/main.cpp|g" \
+    -e "s|@INTEGRITY_SRCS@|tools/integrity/main.cpp|g" \
+    -e "s|@BENCH_SRCS@|tools/bench/main.cpp|g" \
+    -e "s|@EXAMPLE_SRCS@|examples/simple_check.cpp|g" \
+    -e "s|@CRYPTO_SRCS@|$CRYPTO_SRCS|g" -e "s|@CORE_C_SRCS@|$CORE_C_SRCS|g" \
+    -e "s|@CORE_CXX_SRCS@|$CORE_CXX_SRCS|g" -e "s|@TEST_SRCS@|$TEST_SRCS|g" \
+    Makefile.in > Makefile || die "Makefile generation failed"
+
+sed \
+    -e "s|@CMAKE_MIN_VERSION@|3.13|g" -e "s|@VERSION@|$VERSION|g" \
+    -e "s|@PROJECT_DESCRIPTION@|Offline activation verification with Ed25519 and SM2|g" \
+    -e "s|@CSTD_NUM@|99|g" -e "s|@CXXSTD_NUM@|17|g" \
+    -e "s|@WARN_C_LIST@|-Wall;-Wextra|g" -e "s|@WARN_CXX_LIST@|-Wall;-Wextra|g" \
+    -e "s|@LDFLAGS_CXX_ONLY@|-static-libstdc++|g" -e "s|@PREFIX@|$PREFIX|g" \
+    -e "s|@BUILD_TESTS@|$BUILD_TESTS|g" -e "s|@BUILD_TOOLS@|$BUILD_TOOLS|g" \
+    -e "s|@BUILD_EXAMPLES@|$BUILD_EXAMPLES|g" -e "s|@BUILD_BENCH@|$BUILD_BENCH|g" \
+    -e "s|@BUILD_SHARED@|$BUILD_SHARED|g" \
+    -e "s|@CMAKE_SRC_LIST@|$CMAKE_SRC_LIST|g" \
+    -e "s|@CMAKE_TEST_LIST@|$CMAKE_TEST_LIST|g" \
+    CMakeLists.txt.in > CMakeLists.txt || die "CMakeLists generation failed"
+
+{
+    echo "# generated by configure -- safe to delete (clean.sh does)"
+    echo "PREFIX=$PREFIX"; echo "CC=$CC"; echo "CXX=$CXX"; echo "AR=$AR"
+    echo "CFLAGS=$CFLAGS"; echo "CXXFLAGS=$CXXFLAGS"; echo "LDFLAGS=$LDFLAGS"
+    echo "VERSION=$VERSION"; echo "BUILD_SHARED=$BUILD_SHARED"
+    echo "BUILD_TESTS=$BUILD_TESTS"; echo "BUILD_TOOLS=$BUILD_TOOLS"
+    echo "ENDIAN=$ENDIAN"; echo "PTRSZ=$PTRSZ"
+} > config.vars
+
+log ""
+sep
+log "configure finished: $N_OK ok, $N_WARN warnings, $N_NO not-available"
+log "CC=$CC ($CCVER)"
+log "CXX=$CXX ($CXXVER)"
+log "target: $HW, $ENDIAN endian, ${PTRSZ}B pointers"
+
+# ---- summary ---------------------------------------------------
+echo
+cat <<'BOX'
++--------------------------------------------------------------+
+|                    CONFIGURE  SUMMARY                        |
++--------------------------------------------------------------+
+BOX
+echo "| checks  : $N_OK passed, $N_WARN warnings, $N_NO n/a"
+printf '| host    : %s\n' "$(uname -s 2>/dev/null) $(uname -r 2>/dev/null | cut -c1-20) ($HW, $ENDIAN)"
+printf '| product : Engrail v%s\n' "$VERSION"
+printf '| CC      : %s\n' "$(basename "$CC")"
+printf '| CXX     : %s\n' "$(basename "$CXX")"
+printf '| options : shared=%s tests=%s tools=%s\n' "$BUILD_SHARED" "$BUILD_TESTS" "$BUILD_TOOLS"
+echo "+--------------------------------------------------------------+"
+
+cat <<'NEXT'
+
+   ,---.        ,---.
+   | oo | next  | ,--'  1. make           build + smoke self-test
+   | ~~ |       | |     2. make check     10-suite test matrix
+   `---'        `--'    3. make e2e       end-to-end demo
+                       reset: bash clean.sh
+NEXT
+echo " generated : Makefile CMakeLists.txt config.vars"
+echo " full log  : $LOG ($(wc -l < "$LOG" | tr -d ' ') lines)"

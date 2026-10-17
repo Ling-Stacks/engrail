@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Engrail Crypto — in your browser</title>
+<style>
+  body { background:#0F172A; color:#E2E8F0; font:14px/1.6 ui-monospace,monospace;
+         max-width:720px; margin:48px auto; padding:0 16px; }
+  h1 { color:#06B6D4; font-size:20px; }
+  pre { background:#111827; border:1px solid #1F2937; border-radius:8px;
+        padding:16px; white-space:pre-wrap; }
+  button { background:#06B6D4; color:#0F172A; border:0; border-radius:6px;
+           padding:10px 18px; font:bold 14px ui-monospace,monospace;
+           cursor:pointer; }
+</style>
+</head>
+<body>
+<h1>SM2 / SM3 / Ed25519 / license verify — running in your browser</h1>
+<p><button id="run">Run demo</button> (needs engrail_wasm.js + .wasm next to
+this file: <code>sh build.sh</code> with emsdk)</p>
+<pre id="out">click the button…</pre>
+
+<script src="dist/engrail_wasm.js"></script>
+<script type="module">
+const hex = b => Array.from(b, x => x.toString(16).padStart(2,"0")).join("");
+const out = document.getElementById("out");
+document.getElementById("run").onclick = async () => {
+    out.textContent = "loading wasm…\n";
+    try {
+        const { Engrail } = await import("./engrail_wasm.mjs");
+        const eng = await Engrail.load();
+        const t = [];
+        const sm3 = eng.sm3(new TextEncoder().encode("abc"));
+        t.push("SM3('abc')      = " + hex(sm3));
+        const kp = eng.ed25519Keypair();
+        const m = new TextEncoder().encode("hello from the browser");
+        const sig = eng.ed25519Sign(m, kp.privkey);
+        t.push("Ed25519 verify  = " + eng.ed25519Verify(sig, m, kp.pubkey));
+        const s2 = eng.sm2Keypair();
+        const ct = eng.sm2Encrypt(s2.pub, m);
+        t.push("SM2 decrypt     = " +
+               (new TextDecoder().decode(eng.sm2Decrypt(ct, s2.priv)) ===
+                "hello from the browser"));
+        t.push("\nAll of it: zero network calls, zero dependencies, " +
+               "one C file underneath.");
+        out.textContent = t.join("\n");
+    } catch (e) {
+        out.textContent = "error: " + e + "\n(build the wasm first: sh build.sh)";
+    }
+};
+</script>
+</body>
+</html>

@@ -1,0 +1,17 @@
+[package]
+name = "activation"
+version = "1.7.1"
+edition = "2021"
+description = "Rust bindings for ActivationSystem: offline license verification, offline authentication and SM2 (GB/T 32918) national cryptography"
+license = "MIT"
+readme = "../README.md"
+links = "activation"
+build = "build.rs"
+
+# Zero dependencies -- build.rs compiles the vendored C99 core
+# directly with the system toolchain (no cc crate, no network).
+[dependencies]
+
+[lib]
+name = "activation"
+crate-type = ["rlib"]

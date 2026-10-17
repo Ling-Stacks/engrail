@@ -1,0 +1,67 @@
+# Build artifacts
+build/
+*.o
+*.obj
+*.so
+*.dylib
+*.dll
+*.a
+*.lib
+*.exe
+
+# Private keys -- NEVER commit these
+*.key
+*.secret
+private_key*
+secret_key*
+
+# Local activation state (test output)
+*.act
+activation.dat
+
+# Editors / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Python
+__pycache__/
+*.pyc
+libactivation.so
+
+# configure-generated (templates .in are tracked)
+/Makefile
+/CMakeLists.txt
+/config.vars
+# bindings build artifacts
+bindings/java/*.class
+bindings/java/*.jar
+bindings/java/libactivation_jni.so
+bindings/rust/target/
+bindings/rust/Cargo.lock
+bindings/python/activation/libactivation.so
+
+# configure log
+/config.log
+
+# amalgamation output
+/dist/
+/crypto/dist/
+/crypto/build/
+/bindings/wasm/dist/
+/bindings/csharp/build/
+/bindings/csharp/demo_cs.act
+
+# test state files
+demo_*.act
+*_state.act
+demo_state.act
+
+# misc
+*.log
+*.d
+
+# mimosa scanner state
+.mimosa/

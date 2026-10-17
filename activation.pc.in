@@ -1,0 +1,11 @@
+# pkg-config metadata for ActivationSystem
+
+prefix=@PREFIX@
+includedir=${prefix}/include
+libdir=${prefix}/lib
+
+Name: ActivationSystem
+Description: Offline activation-code verification with Ed25519 (C/C++17, zero deps)
+Version: @VERSION@
+Cflags: -I${includedir}
+Libs: -L${libdir} -lactivation

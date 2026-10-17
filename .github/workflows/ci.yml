@@ -1,0 +1,137 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure, build, full test
+        run: |
+          ./configure --enable-shared
+          make
+          make smoke
+          make check
+          make e2e
+          make bindings
+          bash scripts/cli_pass_test.sh
+      - name: Amalgamation still builds standalone
+        run: |
+          make amalgamation
+          cc -Wall -Wextra -Werror -Idist -o /tmp/amal_test examples/c_api_demo.c dist/activation.c
+          /tmp/amal_test || true
+
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure, build, full test
+        run: |
+          ./configure --enable-shared
+          make
+          make smoke
+          make check
+          make e2e
+      - name: Standalone crypto library
+        run: sh crypto/build.sh
+
+  windows-mingw:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            gcc
+            make
+            python
+      # C8: this job used to stop after 6 test binaries, which is where
+      # the Windows-only failures (W1-W4) hid. It runs the same matrix
+      # as Linux now that the toolchain issues are fixed.
+      - name: Configure, build, full test
+        run: |
+          ./configure --cc=gcc --cxx=g++ --enable-shared
+          make
+          make smoke
+          make check
+          make e2e
+          make bindings
+      - name: Standalone crypto + benchmark build
+        run: |
+          sh crypto/build.sh
+          sh crypto/bench.sh --json > bench_out.json
+          head -5 bench_out.json
+      - name: CLI regression (passphrase argument isolation)
+        run: bash scripts/cli_pass_test.sh
+
+  windows-msvc:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: CMake + MSVC (core library)
+        shell: bash
+        run: |
+          ./configure --cc=cl --cxx=cl --disable-tools --disable-examples --disable-bench --disable-tests
+          cmake -B build-msvc -G "Visual Studio 17 2022" .
+          cmake --build build-msvc --config Release
+
+  standalone-crypto:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Single-file crypto library: vectors + benchmark build
+        run: |
+          sh crypto/build.sh
+          sh crypto/bench.sh --json > bench_out.json
+          head -5 bench_out.json
+
+  standalone-crypto-mingw:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            gcc
+            python
+      - name: Single-file crypto library conformance vectors
+        run: sh crypto/build.sh gcc
+
+  wasm:
+    runs-on: ubuntu-latest
+    container:
+      image: emscripten/emsdk:latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build WASM + run node demo & benchmark
+        run: |
+          sh bindings/wasm/build.sh
+          node bindings/wasm/bench.mjs
+
+  csharp:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: C# binding: build native lib + run demo
+        run: sh bindings/csharp/build.sh
