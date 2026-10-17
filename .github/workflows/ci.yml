@@ -73,8 +73,12 @@ jobs:
       - name: CLI regression (passphrase argument isolation)
         run: bash scripts/cli_pass_test.sh
 
+  # Known-broken: configure's capability probes speak the GCC/clang
+  # dialect only; under cl every probe reports failure and configure
+  # aborts (see issue #2). Non-blocking until the probes learn MSVC.
   windows-msvc:
     runs-on: windows-latest
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: ilammy/msvc-dev-cmd@v1

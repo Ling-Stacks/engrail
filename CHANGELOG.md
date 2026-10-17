@@ -19,6 +19,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); versions follow 
 - e2e: `CXX` default + Makefile passes the configured compiler (W4);
   executable paths handed to native Windows tools carry `$EXESUF`
   (W3).
+- engrail-integrity: `std::sprintf` replaced with `std::snprintf` —
+  recent macOS SDKs deprecate sprintf and the `-Werror` build
+  rejected it.
 - GCC 15/16 warning hygiene: tests/common.h self-contained `<stdint.h>`
   (L5); test_fuzz output buffer zero-init (L6); keygen UTC buffer 64B
   (L7).

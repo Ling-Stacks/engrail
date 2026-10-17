@@ -280,7 +280,7 @@ int cmd_patch(int argc, char **argv)
 
     char hex[129];
     for (int i = 0; i < 64; i++) {
-        std::sprintf(hex + 2 * i, "%02x", digest[i]);
+        std::snprintf(hex + 2 * i, 3, "%02x", digest[i]);
     }
     std::printf("integrity digest embedded: %s\n", hex);
     std::printf("patch complete -- do NOT re-sign/re-pack after this step\n");
