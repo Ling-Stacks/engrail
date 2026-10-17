@@ -22,7 +22,7 @@ jobs:
       - name: Amalgamation still builds standalone
         run: |
           make amalgamation
-          cc -Wall -Wextra -Werror -Idist -o /tmp/amal_test examples/c_api_demo.c dist/activation.c
+          cc -Wall -Wextra -Werror -Iinclude -o /tmp/amal_test examples/c_api_demo.c dist/activation.c
           /tmp/amal_test || true
 
   macos:
@@ -31,7 +31,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Configure, build, full test
         run: |
-          ./configure --enable-shared
+          ./configure --enable-shared || { echo '--- config.log tail ---'; tail -60 config.log; exit 1; }
           make
           make smoke
           make check
@@ -77,6 +77,7 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: ilammy/msvc-dev-cmd@v1
       - name: CMake + MSVC (core library)
         shell: bash
         run: |
