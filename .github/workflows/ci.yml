@@ -86,8 +86,8 @@ jobs:
         shell: bash
         run: |
           ./configure --cc=cl --cxx=cl --disable-tools --disable-examples --disable-bench --disable-tests
-          cmake -B build-msvc -G "Visual Studio 17 2022" .
-          cmake --build build-msvc --config Release
+          cmake -B build-msvc -G Ninja .
+          cmake --build build-msvc
 
   standalone-crypto:
     strategy:
